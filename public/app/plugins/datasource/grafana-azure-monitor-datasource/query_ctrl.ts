@@ -499,7 +499,7 @@ export class AzureMonitorQueryCtrl extends QueryCtrl {
   generateAutoUnits(timeGrain: string, timeGrains: Array<{ value: string }>) {
     if (timeGrain === 'auto') {
       return TimegrainConverter.findClosestTimeGrain(
-        this.templateSrv.getBuiltInIntervalValue(),
+        '1m',
         _.map(timeGrains, o => TimegrainConverter.createKbnUnitFromISO8601Duration(o.value)) || [
           '1m',
           '5m',
@@ -581,13 +581,9 @@ export class AzureMonitorQueryCtrl extends QueryCtrl {
   }
 
   /* Application Insights Section */
-
   getAppInsightsAutoInterval() {
-    const interval = this.templateSrv.getBuiltInIntervalValue();
-    if (interval[interval.length - 1] === 's') {
-      return '1m';
-    }
-    return interval;
+    // TODO no way to get this currently from angular
+    return '1m';
   }
 
   getAppInsightsMetricNames() {

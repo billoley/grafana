@@ -1,12 +1,12 @@
-import kbn from 'app/core/utils/kbn';
 import _ from 'lodash';
-import { deprecationWarning, ScopedVars, textUtil, TimeRange, dateTime } from '@grafana/data';
+import { deprecationWarning, ScopedVars, TimeRange, dateTime } from '@grafana/data';
 import { getFilteredVariables, getVariables, getVariableWithName } from '../variables/state/selectors';
 import { variableRegex } from '../variables/utils';
 import { isAdHoc } from '../variables/guard';
 import { VariableModel } from '../variables/types';
 import { setTemplateSrv, TemplateSrv as BaseTemplateSrv } from '@grafana/runtime';
 import { variableAdapters } from '../variables/adapters';
+import { formatRegistry } from './formatRegistry';
 
 function luceneEscape(value: string) {
   return value.replace(/([\!\*\+\-\=<>\s\&\|\(\)\[\]\{\}\^\~\?\:\\/"])/g, '\\$1');
@@ -33,13 +33,10 @@ export class TemplateSrv implements BaseTemplateSrv {
   private regex = variableRegex;
   private index: any = {};
   private grafanaVariables: any = {};
-  private builtIns: any = {};
   private timeRange?: TimeRange | null = null;
   private fieldAccessorCache: FieldAccessorCache = {};
 
   constructor(private dependencies: TemplateSrvDependencies = runtimeDependencies) {
-    this.builtIns['__interval'] = { text: '1s', value: '1s' };
-    this.builtIns['__interval_ms'] = { text: '100', value: '100' };
     this._variables = [];
   }
 
@@ -47,10 +44,6 @@ export class TemplateSrv implements BaseTemplateSrv {
     this._variables = variables;
     this.timeRange = timeRange;
     this.updateIndex();
-  }
-
-  getBuiltInIntervalValue() {
-    return this.builtIns.__interval.value;
   }
 
   /**
@@ -154,8 +147,9 @@ export class TemplateSrv implements BaseTemplateSrv {
       return format(value, variable, this.formatValue);
     }
 
-    if (!format) {
-      format = 'glob';
+    const formatItem = formatRegistry.getIfExists(format ?? 'glob');
+    if (!formatItem) {
+      throw new Error(`Variable format ${format} not found`);
     }
 
     // some formats have arguments that come after ':' character
@@ -167,89 +161,100 @@ export class TemplateSrv implements BaseTemplateSrv {
       args = [];
     }
 
-    switch (format) {
-      case 'regex': {
-        if (typeof value === 'string') {
-          return kbn.regexEscape(value);
-        }
+    return formatItem.formatter(value, args, variable);
 
-        const escapedValues = _.map(value, kbn.regexEscape);
-        if (escapedValues.length === 1) {
-          return escapedValues[0];
-        }
-        return '(' + escapedValues.join('|') + ')';
-      }
-      case 'lucene': {
-        return this.luceneFormat(value);
-      }
-      case 'pipe': {
-        if (typeof value === 'string') {
-          return value;
-        }
-        return value.join('|');
-      }
-      case 'distributed': {
-        if (typeof value === 'string') {
-          return value;
-        }
-        return this.distributeVariable(value, variable.name);
-      }
-      case 'csv': {
-        if (_.isArray(value)) {
-          return value.join(',');
-        }
-        return value;
-      }
-      case 'html': {
-        if (_.isArray(value)) {
-          return textUtil.escapeHtml(value.join(', '));
-        }
-        return textUtil.escapeHtml(value);
-      }
-      case 'json': {
-        return JSON.stringify(value);
-      }
-      case 'percentencode': {
-        // like glob, but url escaped
-        if (_.isArray(value)) {
-          return this.encodeURIComponentStrict('{' + value.join(',') + '}');
-        }
-        return this.encodeURIComponentStrict(value);
-      }
-      case 'singlequote': {
-        // escape single quotes with backslash
-        const regExp = new RegExp(`'`, 'g');
-        if (_.isArray(value)) {
-          return _.map(value, v => `'${_.replace(v, regExp, `\\'`)}'`).join(',');
-        }
-        return `'${_.replace(value, regExp, `\\'`)}'`;
-      }
-      case 'doublequote': {
-        // escape double quotes with backslash
-        const regExp = new RegExp('"', 'g');
-        if (_.isArray(value)) {
-          return _.map(value, v => `"${_.replace(v, regExp, '\\"')}"`).join(',');
-        }
-        return `"${_.replace(value, regExp, '\\"')}"`;
-      }
-      case 'sqlstring': {
-        // escape single quotes by pairing them
-        const regExp = new RegExp(`'`, 'g');
-        if (_.isArray(value)) {
-          return _.map(value, v => `'${_.replace(v, regExp, "''")}'`).join(',');
-        }
-        return `'${_.replace(value, regExp, "''")}'`;
-      }
-      case 'date': {
-        return this.formatDate(value, args);
-      }
-      case 'glob': {
-        if (_.isArray(value) && value.length > 1) {
-          return '{' + value.join(',') + '}';
-        }
-        return value;
-      }
-    }
+    // // some formats have arguments that come after ':' character
+    // let args = format.split(':');
+    // if (args.length > 1) {
+    //   format = args[0];
+    //   args = args.slice(1);
+    // } else {
+    //   args = [];
+    // }
+
+    // switch (format) {
+    //   case 'regex': {
+    //     if (typeof value === 'string') {
+    //       return kbn.regexEscape(value);
+    //     }
+
+    //     const escapedValues = _.map(value, kbn.regexEscape);
+    //     if (escapedValues.length === 1) {
+    //       return escapedValues[0];
+    //     }
+    //     return '(' + escapedValues.join('|') + ')';
+    //   }
+    //   case 'lucene': {
+    //     return this.luceneFormat(value);
+    //   }
+    //   case 'pipe': {
+    //     if (typeof value === 'string') {
+    //       return value;
+    //     }
+    //     return value.join('|');
+    //   }
+    //   case 'distributed': {
+    //     if (typeof value === 'string') {
+    //       return value;
+    //     }
+    //     return this.distributeVariable(value, variable.name);
+    //   }
+    //   case 'csv': {
+    //     if (_.isArray(value)) {
+    //       return value.join(',');
+    //     }
+    //     return value;
+    //   }
+    //   case 'html': {
+    //     if (_.isArray(value)) {
+    //       return textUtil.escapeHtml(value.join(', '));
+    //     }
+    //     return textUtil.escapeHtml(value);
+    //   }
+    //   case 'json': {
+    //     return JSON.stringify(value);
+    //   }
+    //   case 'percentencode': {
+    //     // like glob, but url escaped
+    //     if (_.isArray(value)) {
+    //       return this.encodeURIComponentStrict('{' + value.join(',') + '}');
+    //     }
+    //     return this.encodeURIComponentStrict(value);
+    //   }
+    //   case 'singlequote': {
+    //     // escape single quotes with backslash
+    //     const regExp = new RegExp(`'`, 'g');
+    //     if (_.isArray(value)) {
+    //       return _.map(value, v => `'${_.replace(v, regExp, `\\'`)}'`).join(',');
+    //     }
+    //     return `'${_.replace(value, regExp, `\\'`)}'`;
+    //   }
+    //   case 'doublequote': {
+    //     // escape double quotes with backslash
+    //     const regExp = new RegExp('"', 'g');
+    //     if (_.isArray(value)) {
+    //       return _.map(value, v => `"${_.replace(v, regExp, '\\"')}"`).join(',');
+    //     }
+    //     return `"${_.replace(value, regExp, '\\"')}"`;
+    //   }
+    //   case 'sqlstring': {
+    //     // escape single quotes by pairing them
+    //     const regExp = new RegExp(`'`, 'g');
+    //     if (_.isArray(value)) {
+    //       return _.map(value, v => `'${_.replace(v, regExp, "''")}'`).join(',');
+    //     }
+    //     return `'${_.replace(value, regExp, "''")}'`;
+    //   }
+    //   case 'date': {
+    //     return this.formatDate(value, args);
+    //   }
+    //   case 'glob': {
+    //     if (_.isArray(value) && value.length > 1) {
+    //       return '{' + value.join(',') + '}';
+    //     }
+    //     return value;
+    //   }
+    // }
   }
 
   formatDate(value: any, args: string[]): string {
@@ -310,7 +315,7 @@ export class TemplateSrv implements BaseTemplateSrv {
     str = _.escape(str);
     this.regex.lastIndex = 0;
     return str.replace(this.regex, (match, var1, var2, fmt2, var3) => {
-      if (this.getVariableAtIndex(var1 || var2 || var3) || this.builtIns[var1 || var2 || var3]) {
+      if (this.getVariableAtIndex(var1 || var2 || var3)) {
         return '<span class="template-variable">' + match + '</span>';
       }
       return match;
