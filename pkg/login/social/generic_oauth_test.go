@@ -184,6 +184,19 @@ func TestUserInfoSearchesForEmailAndRole(t *testing.T) {
 			ExpectedRole      string
 		}{
 			{
+				Name: "Given a valid id_token with no role, a valid role path, a valid api response with no email, merge",
+				OAuth2Extra: map[string]interface{}{
+					// { "email": "john.doe@example.com" }
+					"id_token": "eyJhbGciOiJSUzUxMiIsInppcCI6IkdaSVAifQ.H4sIAAAAAAAAAM1U32_aMBD-VyI_pw-tyARomeQkBJhWqCC0D1NUmeAOTyaObGddi_jfd5c4NEJ95GEPzt33-Xy-X86RmHpLxqQow1chpWAH79VTkr_5nqrDrVLvHpOSl96eHYS0qgT-c7oIa_P1Om6-EZ-wegdhJTSjT_RxAoQwBoh4EUpVMLlXxvrechNabqwof_leDAfBjP-tyPg2GA1Gd8NhEPik0qIsRMUkHP95JLuSjI-Y9G9e2GRxtdTbCGuur-nz5JPacJ29VRycbtaTVVMZu8dcSPL07Kjv0XK9fqbJ_XwBCPhOTZdL-EYUjZJJCt-HTfRjHqOymj_SDCtL0QQWsgks5NB0CmsGa05yn2jIormVwvVKi3e-20BozeXKGLo7iFIYq5lVSF7iVKkVeMCbmHZawl-c9lBvpSg6oMUfZrlDKKiTkZOxk4mTEydTJ6dOzpw8J5ApjP6eVRWMDM5BuwtZNSbtGUCzDk0RTRFdpN0rf_6RE7BY67wLB3CKqJcfUK4F-aelg_1-N_PLUrYXnzf7xULXrql5VxjgzihpDncoRhR3KGpi7xBtGo2o6xtmArOUf3QNfcFE5TCjhebMClVm4sDbxzcc3A2CIBh9aR6k0L3tm1uflAy1_-2nc8pP_wCNwmogDwUAAA.FT0YsBNTb6EwstD3LaZbP1k0zBJUrJ-2ycm9pyHLQNVV6ilkwrg0KzjGu6S-eux8yLDPaIAriA8iYX346j43Vg2u-pE9r8cvsjE3ijbjCzLa5lq-MvZuvqbgXKloscIAqDscXjw4_c6N5cFNxPn99Cdszd9J6KTOJiSuzvqmBlfH7zwO_ZJPMPjYAu7ZYy_rsBA-FV36v4O13mSTLapG4lTsme6LGazcsm6sAMkx41ZRtmH-Cxln3darGTZZY8akFzEfyNU1AEjZcOuWCftKxDYPpttDxvOfPVc9M7aT2rpwW6KfsN7Dg2yo1Dt-UVh23ocVuVOQUYiWRgxrod__7Q",
+				},
+				APIURLReponse: map[string]interface{}{
+					"role": "FromResponse",
+				},
+				RoleAttributePath: "role",
+				ExpectedEmail:     "john.doe@example.com",
+				ExpectedRole:      "FromResponse",
+			},
+			{
 				Name: "Given a valid id_token, a valid role path, no api response, use id_token",
 				OAuth2Extra: map[string]interface{}{
 					// { "role": "Admin", "email": "john.doe@example.com" }

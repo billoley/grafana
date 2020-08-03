@@ -3,6 +3,10 @@ package wrapper
 import (
 	"context"
 	"fmt"
+	"github.com/grafana/grafana/pkg/bus"
+	"github.com/grafana/grafana/pkg/login/social"
+	"golang.org/x/oauth2"
+	"strings"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/grpcplugin"
 
@@ -45,11 +49,60 @@ func ModelToInstanceSettings(ds *models.DataSource) (*backend.DataSourceInstance
 	}, nil
 }
 
+func (t *DatasourcePluginWrapperV2) addOAuthPassThruAuth(ctx context.Context, query *tsdb.TsdbQuery) {
+	t.logger.Error("addOAuthPassThruAuth")
+	authInfoQuery := &models.GetAuthInfoQuery{UserId: query.User.UserId}
+	if err := bus.Dispatch(authInfoQuery); err != nil {
+		t.logger.Error("Error fetching oauth information for user", "error", err)
+		return
+	}
+
+	provider := authInfoQuery.Result.AuthModule
+	connect, ok := social.SocialMap[strings.TrimPrefix(provider, "oauth_")] // The socialMap keys don't have "oauth_" prefix, but everywhere else in the system does
+	if !ok {
+		t.logger.Error("Failed to find oauth provider with given name", "provider", provider)
+		return
+	}
+
+	// TokenSource handles refreshing the token if it has expired
+	token, err := connect.TokenSource(ctx, &oauth2.Token{
+		AccessToken:  authInfoQuery.Result.OAuthAccessToken,
+		Expiry:       authInfoQuery.Result.OAuthExpiry,
+		RefreshToken: authInfoQuery.Result.OAuthRefreshToken,
+		TokenType:    authInfoQuery.Result.OAuthTokenType,
+	}).Token()
+	if err != nil {
+		t.logger.Error("Failed to retrieve access token from oauth provider", "provider", authInfoQuery.Result.AuthModule, "error", err)
+		return
+	}
+
+	// If the tokens are not the same, update the entry in the DB
+	if token.AccessToken != authInfoQuery.Result.OAuthAccessToken {
+		updateAuthCommand := &models.UpdateAuthInfoCommand{
+			UserId:     authInfoQuery.Result.UserId,
+			AuthModule: authInfoQuery.Result.AuthModule,
+			AuthId:     authInfoQuery.Result.AuthId,
+			OAuthToken: token,
+		}
+		if err := bus.Dispatch(updateAuthCommand); err != nil {
+			t.logger.Error("Failed to update access token during token refresh", "error", err)
+			return
+		}
+	}
+	delete(query.Headers, "Authorization")
+	query.Headers["Authorization"] = fmt.Sprintf("%s %s", token.Type(), token.AccessToken)
+}
+
 func (tw *DatasourcePluginWrapperV2) Query(ctx context.Context, ds *models.DataSource, query *tsdb.TsdbQuery) (*tsdb.Response, error) {
 	instanceSettings, err := ModelToInstanceSettings(ds)
 	if err != nil {
 		return nil, err
 	}
+
+	if query.Headers == nil {
+		query.Headers = make(map[string]string)
+	}
+	tw.addOAuthPassThruAuth(ctx, query)
 
 	pbQuery := &pluginv2.QueryDataRequest{
 		PluginContext: &pluginv2.PluginContext{
@@ -59,6 +112,7 @@ func (tw *DatasourcePluginWrapperV2) Query(ctx context.Context, ds *models.DataS
 			DataSourceInstanceSettings: backend.ToProto().DataSourceInstanceSettings(instanceSettings),
 		},
 		Queries: []*pluginv2.DataQuery{},
+		Headers: query.Headers,
 	}
 
 	for _, q := range query.Queries {

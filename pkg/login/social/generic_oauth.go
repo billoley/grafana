@@ -1,13 +1,17 @@
 package social
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/mail"
 	"regexp"
+	"strings"
 
 	"github.com/grafana/grafana/pkg/util/errutil"
 
@@ -165,6 +169,29 @@ func (s *SocialGenericOAuth) extractToken(data *UserInfoJson, token *oauth2.Toke
 	if err != nil {
 		s.log.Error("Error base64 decoding id_token", "raw_payload", matched[2], "error", err)
 		return false
+	}
+
+	var headerBytes []byte
+	headerBytes, err = base64.RawURLEncoding.DecodeString(matched[1])
+	if err != nil {
+		s.log.Error("Error base64 decoding header", "header", matched[1], "error", err)
+		return false
+	}
+
+	var header map[string]string
+	err = json.Unmarshal(headerBytes, &header)
+	if strings.EqualFold(header["zip"], "GZIP") {
+		gr, err := gzip.NewReader(bytes.NewBuffer(data.rawJSON))
+		if err != nil {
+			s.log.Error("Error creating decompressor", "raw_payload", matched[2], "error", err)
+			return false
+		}
+		defer gr.Close()
+		data.rawJSON, err = ioutil.ReadAll(gr)
+		if err != nil {
+			s.log.Error("Error decompressing raw_payload", "raw_payload", matched[2], "error", err)
+			return false
+		}
 	}
 
 	err = json.Unmarshal(data.rawJSON, data)
