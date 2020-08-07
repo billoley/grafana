@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/models"
-	"github.com/grafana/grafana/pkg/tsdb"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -268,17 +267,17 @@ var GetOAuthHttpClient = func(name string) (*http.Client, error) {
 	return oauthClient, nil
 }
 
-var AddOAuthPassThruAuth = func(ctx context.Context, query *tsdb.TsdbQuery) error {
-	log.Error("addOAuthPassThruAuth")
-	authInfoQuery := &models.GetAuthInfoQuery{UserId: query.User.UserId}
+var GetCurrentOAuthToken = func(ctx context.Context, userId int64) (*oauth2.Token, error) {
+	log.Error(0,"GetCurrentOAuthToken")
+	authInfoQuery := &models.GetAuthInfoQuery{UserId: userId}
 	if err := bus.Dispatch(authInfoQuery); err != nil {
-		return fmt.Errorf("Error fetching oauth information for user", "error", err)
+		return nil, fmt.Errorf("Error fetching oauth information for user", "error", err)
 	}
 
 	provider := authInfoQuery.Result.AuthModule
 	connect, ok := SocialMap[strings.TrimPrefix(provider, "oauth_")] // The socialMap keys don't have "oauth_" prefix, but everywhere else in the system does
 	if !ok {
-		return fmt.Errorf("Failed to find oauth provider with given name", "provider", provider)
+		return nil, fmt.Errorf("Failed to find oauth provider with given name", "provider", provider)
 	}
 
 	client, err := GetOAuthHttpClient(strings.TrimPrefix(provider, "oauth_"))
@@ -295,7 +294,7 @@ var AddOAuthPassThruAuth = func(ctx context.Context, query *tsdb.TsdbQuery) erro
 		TokenType:    authInfoQuery.Result.OAuthTokenType,
 	}).Token()
 	if err != nil {
-		return fmt.Errorf("Failed to retrieve access token from oauth provider", "provider", authInfoQuery.Result.AuthModule, "error", err)
+		return nil, fmt.Errorf("Failed to retrieve access token from oauth provider", "provider", authInfoQuery.Result.AuthModule, "error", err)
 	}
 
 	// If the tokens are not the same, update the entry in the DB
@@ -307,10 +306,9 @@ var AddOAuthPassThruAuth = func(ctx context.Context, query *tsdb.TsdbQuery) erro
 			OAuthToken: token,
 		}
 		if err := bus.Dispatch(updateAuthCommand); err != nil {
-			return fmt.Errorf("Failed to update access token during token refresh", "error", err)
+			return nil, fmt.Errorf("Failed to update access token during token refresh", "error", err)
 		}
 	}
-	delete(query.Headers, "Authorization")
-	query.Headers["Authorization"] = fmt.Sprintf("%s %s", token.Type(), token.AccessToken)
-	return nil
+
+	return token, nil
 }

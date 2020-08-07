@@ -13,11 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
-	"golang.org/x/oauth2"
-
 	"github.com/grafana/grafana/pkg/api/datasource"
-	"github.com/grafana/grafana/pkg/bus"
 	glog "github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/login/social"
 	"github.com/grafana/grafana/pkg/models"
@@ -25,6 +21,7 @@ import (
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
 	"github.com/grafana/grafana/pkg/util/proxyutil"
+	"github.com/opentracing/opentracing-go"
 )
 
 var (
@@ -210,7 +207,16 @@ func (proxy *DataSourceProxy) getDirector() func(req *http.Request) {
 		}
 
 		if proxy.ds.JsonData != nil && proxy.ds.JsonData.Get("oauthPassThru").MustBool() {
-			addOAuthPassThruAuth(proxy.ctx, req)
+			token, err := social.GetCurrentOAuthToken(proxy.ctx.Req.Context(), proxy.ctx.UserId)
+			if (err != nil) {
+				logger.Error("Error fetching oauth information for user", "error", err)
+			}
+			if (token != nil) {
+				req.Header.Del("Authorization")
+				req.Header.Add("Authorization", fmt.Sprintf("%s %s", token.Type(), token.AccessToken))
+			} else {
+				logger.Error("Error fetching oauth information for user", "error")
+			}
 		}
 	}
 }
@@ -301,47 +307,4 @@ func checkWhiteList(c *models.ReqContext, host string) bool {
 	}
 
 	return true
-}
-
-func addOAuthPassThruAuth(c *models.ReqContext, req *http.Request) {
-	authInfoQuery := &models.GetAuthInfoQuery{UserId: c.UserId}
-	if err := bus.Dispatch(authInfoQuery); err != nil {
-		logger.Error("Error fetching oauth information for user", "error", err)
-		return
-	}
-
-	provider := authInfoQuery.Result.AuthModule
-	connect, ok := social.SocialMap[strings.TrimPrefix(provider, "oauth_")] // The socialMap keys don't have "oauth_" prefix, but everywhere else in the system does
-	if !ok {
-		logger.Error("Failed to find oauth provider with given name", "provider", provider)
-		return
-	}
-
-	// TokenSource handles refreshing the token if it has expired
-	token, err := connect.TokenSource(c.Req.Context(), &oauth2.Token{
-		AccessToken:  authInfoQuery.Result.OAuthAccessToken,
-		Expiry:       authInfoQuery.Result.OAuthExpiry,
-		RefreshToken: authInfoQuery.Result.OAuthRefreshToken,
-		TokenType:    authInfoQuery.Result.OAuthTokenType,
-	}).Token()
-	if err != nil {
-		logger.Error("Failed to retrieve access token from oauth provider", "provider", authInfoQuery.Result.AuthModule, "error", err)
-		return
-	}
-
-	// If the tokens are not the same, update the entry in the DB
-	if token.AccessToken != authInfoQuery.Result.OAuthAccessToken {
-		updateAuthCommand := &models.UpdateAuthInfoCommand{
-			UserId:     authInfoQuery.Result.UserId,
-			AuthModule: authInfoQuery.Result.AuthModule,
-			AuthId:     authInfoQuery.Result.AuthId,
-			OAuthToken: token,
-		}
-		if err := bus.Dispatch(updateAuthCommand); err != nil {
-			logger.Error("Failed to update access token during token refresh", "error", err)
-			return
-		}
-	}
-	req.Header.Del("Authorization")
-	req.Header.Add("Authorization", fmt.Sprintf("%s %s", token.Type(), token.AccessToken))
 }

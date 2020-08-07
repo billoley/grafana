@@ -3,10 +3,8 @@ package wrapper
 import (
 	"context"
 	"fmt"
-	"github.com/grafana/grafana/pkg/bus"
+	"github.com/grafana/grafana/pkg/cmd/grafana-cli/logger"
 	"github.com/grafana/grafana/pkg/login/social"
-	"golang.org/x/oauth2"
-	"strings"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/grpcplugin"
 
@@ -147,7 +145,22 @@ func (tw *DatasourcePluginWrapperV2) Query(ctx context.Context, ds *models.DataS
 	if query.Headers == nil {
 		query.Headers = make(map[string]string)
 	}
-	social.AddOAuthPassThruAuth(ctx, query)
+
+	if (ds.JsonData != nil && ds.JsonData.Get("oauthPassThru").MustBool()) {
+		// skip AddOAuthPassThruAuth for alerts
+		if (query.User != nil) {
+			token, err := social.GetCurrentOAuthToken(ctx, query.User.UserId)
+			if (err != nil) {
+				logger.Error("Error fetching oauth information for user", "error", err)
+			}
+			if (token != nil) {
+				delete(query.Headers, "Authorization")
+				query.Headers["Authorization"] = fmt.Sprintf("%s %s", token.Type(), token.AccessToken)
+			} else {
+				logger.Error("Error fetching oauth information for user", "error")
+			}
+		}
+	}
 
 	pbQuery := &pluginv2.QueryDataRequest{
 		PluginContext: &pluginv2.PluginContext{
