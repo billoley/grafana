@@ -211,7 +211,16 @@ func (proxy *DataSourceProxy) getDirector() func(req *http.Request) {
 		}
 
 		if proxy.ds.JsonData != nil && proxy.ds.JsonData.Get("oauthPassThru").MustBool() {
-			addOAuthPassThruAuth(proxy.ctx, req)
+			token, err := social.GetCurrentOAuthToken(proxy.ctx.Req.Context(), proxy.ctx.UserId)
+			if err != nil {
+				logger.Error("Error fetching oauth information for user", "error", err)
+			}
+			if token != nil {
+				req.Header.Del("Authorization")
+				req.Header.Add("Authorization", fmt.Sprintf("%s %s", token.Type(), token.AccessToken))
+			} else {
+				logger.Error("Error fetching oauth information for user", "error")
+			}
 		}
 	}
 }
