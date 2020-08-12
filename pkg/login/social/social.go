@@ -1,8 +1,16 @@
 package social
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strings"
+
+	"github.com/grafana/grafana/pkg/bus"
+	"github.com/grafana/grafana/pkg/cmd/grafana-cli/logger"
+	"github.com/grafana/grafana/pkg/models"
 
 	"context"
 
@@ -222,4 +230,93 @@ var GetOAuthProviders = func(cfg *setting.Cfg) map[string]bool {
 	}
 
 	return result
+}
+
+var GetOAuthHttpClient = func(name string) (*http.Client, error) {
+	name = strings.TrimPrefix(name, "oauth_")
+
+	// handle call back
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: setting.OAuthService.OAuthInfos[name].TlsSkipVerify,
+		},
+	}
+	oauthClient := &http.Client{
+		Transport: tr,
+	}
+
+	if setting.OAuthService.OAuthInfos[name].TlsClientCert != "" || setting.OAuthService.OAuthInfos[name].TlsClientKey != "" {
+		cert, err := tls.LoadX509KeyPair(setting.OAuthService.OAuthInfos[name].TlsClientCert, setting.OAuthService.OAuthInfos[name].TlsClientKey)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to setup TlsClientCert error: %s", err)
+		}
+
+		tr.TLSClientConfig.Certificates = append(tr.TLSClientConfig.Certificates, cert)
+	}
+
+	if setting.OAuthService.OAuthInfos[name].TlsClientCa != "" {
+		caCert, err := ioutil.ReadFile(setting.OAuthService.OAuthInfos[name].TlsClientCa)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to setup TlsClientCa error: %s", err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+		tr.TLSClientConfig.RootCAs = caCertPool
+	}
+	return oauthClient, nil
+}
+
+var GetCurrentOAuthToken = func(ctx context.Context, user models.SignedInUser) (*oauth2.Token, error) {
+	authInfoQuery := &models.GetAuthInfoQuery{UserId: user.UserId}
+	if err := bus.Dispatch(authInfoQuery); err != nil {
+		return nil, fmt.Errorf("Error fetching oauth information for userid:%d username:%s error:%s", user.UserId, user.Login, err)
+	}
+
+	provider := authInfoQuery.Result.AuthModule
+	connect, ok := SocialMap[strings.TrimPrefix(provider, "oauth_")] // The socialMap keys don't have "oauth_" prefix, but everywhere else in the system does
+	if !ok {
+		return nil, fmt.Errorf("Failed to find oauth provider with given name:%s", provider)
+	}
+
+	client, err := GetOAuthHttpClient(strings.TrimPrefix(provider, "oauth_"))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create http client for oauth operation error:%s", err)
+	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
+
+	persistedToken := &oauth2.Token{
+		AccessToken:  authInfoQuery.Result.OAuthAccessToken,
+		Expiry:       authInfoQuery.Result.OAuthExpiry,
+		RefreshToken: authInfoQuery.Result.OAuthRefreshToken,
+		TokenType:    authInfoQuery.Result.OAuthTokenType,
+	}
+	// TokenSource handles refreshing the token if it has expired
+	token, err := connect.TokenSource(ctx, persistedToken).Token()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to retrieve access token from OAuth provider:%s userid:%d username:%s error:%s", authInfoQuery.Result.AuthModule, user.UserId, user.Login, err)
+	}
+
+	// If the tokens are not the same, update the entry in the DB
+	if !tokensEq(persistedToken, token) {
+		updateAuthCommand := &models.UpdateAuthInfoCommand{
+			UserId:     authInfoQuery.Result.UserId,
+			AuthModule: authInfoQuery.Result.AuthModule,
+			AuthId:     authInfoQuery.Result.AuthId,
+			OAuthToken: token,
+		}
+		if err := bus.Dispatch(updateAuthCommand); err != nil {
+			return nil, fmt.Errorf("Failed to update auth info during token refresh userId:%d username:%s error:%s", user.UserId, user.Login, err)
+		}
+		logger.Debug("Updated OAuth info while proxying an OAuth pass-thru request", "userid", user.UserId, "username", user.Login)
+	}
+	return token, nil
+}
+
+// tokensEq checks for OAuth2 token equivalence given the fields of the struct Grafana is interested in
+func tokensEq(t1, t2 *oauth2.Token) bool {
+	return t1.AccessToken == t2.AccessToken &&
+		t1.RefreshToken == t2.RefreshToken &&
+		t1.Expiry == t2.Expiry &&
+		t1.TokenType == t2.TokenType
 }

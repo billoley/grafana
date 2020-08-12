@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/grafana/grafana/pkg/login/social"
+
 	"github.com/grafana/grafana-plugin-sdk-go/backend/grpcplugin"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -51,6 +53,23 @@ func (tw *DatasourcePluginWrapperV2) Query(ctx context.Context, ds *models.DataS
 		return nil, err
 	}
 
+	if query.Headers == nil {
+		query.Headers = make(map[string]string)
+	}
+
+	if ds.JsonData != nil && ds.JsonData.Get("oauthPassThru").MustBool() {
+		// skip AddOAuthPassThruAuth for alerts
+		if query.User != nil {
+			token, err := social.GetCurrentOAuthToken(ctx, *query.User)
+			if err != nil {
+				tw.logger.Error("Error fetching oauth information for user", "error", err)
+			} else if token != nil {
+				delete(query.Headers, "Authorization")
+				query.Headers["Authorization"] = fmt.Sprintf("%s %s", token.Type(), token.AccessToken)
+			}
+		}
+	}
+
 	pbQuery := &pluginv2.QueryDataRequest{
 		PluginContext: &pluginv2.PluginContext{
 			OrgId:                      ds.OrgId,
@@ -59,6 +78,7 @@ func (tw *DatasourcePluginWrapperV2) Query(ctx context.Context, ds *models.DataS
 			DataSourceInstanceSettings: backend.ToProto().DataSourceInstanceSettings(instanceSettings),
 		},
 		Queries: []*pluginv2.DataQuery{},
+		Headers: query.Headers,
 	}
 
 	for _, q := range query.Queries {

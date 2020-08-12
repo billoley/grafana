@@ -379,6 +379,10 @@ func TestDSRouteRule(t *testing.T) {
 		})
 
 		Convey("When proxying a datasource that has oauth token pass-through enabled", func() {
+			setting.OAuthService = &setting.OAuther{}
+			setting.OAuthService.OAuthInfos = make(map[string]*setting.OAuthInfo)
+			info := &setting.OAuthInfo{}
+			setting.OAuthService.OAuthInfos["generic_oauth"] = info
 			social.SocialMap["generic_oauth"] = &social.SocialGenericOAuth{
 				SocialBase: &social.SocialBase{
 					Config: &oauth2.Config{},

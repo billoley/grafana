@@ -1,17 +1,19 @@
 package social
 
 import (
+	"bytes"
+	"compress/zlib"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/mail"
 	"regexp"
 
-	"github.com/grafana/grafana/pkg/util/errutil"
-
 	"github.com/grafana/grafana/pkg/models"
+	"github.com/grafana/grafana/pkg/util/errutil"
 	"golang.org/x/oauth2"
 )
 
@@ -165,6 +167,37 @@ func (s *SocialGenericOAuth) extractToken(data *UserInfoJson, token *oauth2.Toke
 	if err != nil {
 		s.log.Error("Error base64 decoding id_token", "raw_payload", matched[2], "error", err)
 		return false
+	}
+
+	headerBytes, err := base64.RawURLEncoding.DecodeString(matched[1])
+	if err != nil {
+		s.log.Error("Error base64 decoding header", "header", matched[1], "error", err)
+		return false
+	}
+
+	var header map[string]string
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		s.log.Error("Error deserializing header", "error", err)
+		return false
+	}
+
+	if compression, ok := header["zip"]; ok {
+		if compression != "DEF" {
+			s.log.Warn("Unknown compression algorithm", "algorithm", compression)
+			return false
+		}
+
+		fr, err := zlib.NewReader(bytes.NewReader(data.rawJSON))
+		if err != nil {
+			s.log.Error("Error creating zlib reader", "error", err)
+			return false
+		}
+		defer fr.Close()
+		data.rawJSON, err = ioutil.ReadAll(fr)
+		if err != nil {
+			s.log.Error("Error decompressing payload", "error", err)
+			return false
+		}
 	}
 
 	err = json.Unmarshal(data.rawJSON, data)
