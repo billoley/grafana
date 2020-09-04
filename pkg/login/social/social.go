@@ -234,7 +234,7 @@ var GetOAuthProviders = func(cfg *setting.Cfg) map[string]bool {
 	return result
 }
 
-var GetOAuthHttpClient = func(name string) (*http.Client, error) {
+func GetOAuthHttpClient(name string) (*http.Client, error) {
 	name = strings.TrimPrefix(name, "oauth_")
 
 	// handle call back
