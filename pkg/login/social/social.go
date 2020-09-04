@@ -237,19 +237,24 @@ var GetOAuthProviders = func(cfg *setting.Cfg) map[string]bool {
 func GetOAuthHttpClient(name string) (*http.Client, error) {
 	name = strings.TrimPrefix(name, "oauth_")
 
+	info, ok := setting.OAuthService.OAuthInfos[name]
+	if !ok {
+		return nil, fmt.Errorf("Could not find %s in OAuth Settings", name)
+	}
+	
 	// handle call back
 	tr := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: setting.OAuthService.OAuthInfos[name].TlsSkipVerify,
+			InsecureSkipVerify: info.TlsSkipVerify,
 		},
 	}
 	oauthClient := &http.Client{
 		Transport: tr,
 	}
 
-	if setting.OAuthService.OAuthInfos[name].TlsClientCert != "" || setting.OAuthService.OAuthInfos[name].TlsClientKey != "" {
-		cert, err := tls.LoadX509KeyPair(setting.OAuthService.OAuthInfos[name].TlsClientCert, setting.OAuthService.OAuthInfos[name].TlsClientKey)
+	if info.TlsClientCert != "" || info.TlsClientKey != "" {
+		cert, err := tls.LoadX509KeyPair(info.TlsClientCert, info.TlsClientKey)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to setup TlsClientCert error: %s", err)
 		}
@@ -257,8 +262,8 @@ func GetOAuthHttpClient(name string) (*http.Client, error) {
 		tr.TLSClientConfig.Certificates = append(tr.TLSClientConfig.Certificates, cert)
 	}
 
-	if setting.OAuthService.OAuthInfos[name].TlsClientCa != "" {
-		caCert, err := ioutil.ReadFile(setting.OAuthService.OAuthInfos[name].TlsClientCa)
+	if info.TlsClientCa != "" {
+		caCert, err := ioutil.ReadFile(info.TlsClientCa)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to setup TlsClientCa error: %s", err)
 		}

@@ -63,10 +63,9 @@ func (tw *DatasourcePluginWrapperV2) Query(ctx context.Context, ds *models.DataS
 			token, err := social.GetCurrentOAuthToken(ctx, *query.User)
 			if err != nil {
 				tw.logger.Error("Error fetching oauth information for user", "error", err)
-			} else if token != nil {
-				delete(query.Headers, "Authorization")
-				query.Headers["Authorization"] = fmt.Sprintf("%s %s", token.Type(), token.AccessToken)
 			}
+			delete(query.Headers, "Authorization")
+			query.Headers["Authorization"] = fmt.Sprintf("%s %s", token.Type(), token.AccessToken)
 		}
 	}
 

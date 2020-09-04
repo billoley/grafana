@@ -213,10 +213,8 @@ func (proxy *DataSourceProxy) getDirector() func(req *http.Request) {
 				logger.Error("Error fetching oauth token for user", "error", err)
 				return
 			}
-			if token != nil {
-				req.Header.Del("Authorization")
-				req.Header.Add("Authorization", fmt.Sprintf("%s %s", token.Type(), token.AccessToken))
-			}
+			req.Header.Del("Authorization")
+			req.Header.Add("Authorization", fmt.Sprintf("%s %s", token.Type(), token.AccessToken))
 		}
 	}
 }
