@@ -241,7 +241,7 @@ func GetOAuthHttpClient(name string) (*http.Client, error) {
 	if !ok {
 		return nil, fmt.Errorf("Could not find %s in OAuth Settings", name)
 	}
-	
+
 	// handle call back
 	tr := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
