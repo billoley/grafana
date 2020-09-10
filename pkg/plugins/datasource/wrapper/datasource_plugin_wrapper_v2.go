@@ -3,8 +3,7 @@ package wrapper
 import (
 	"context"
 	"fmt"
-
-	"github.com/grafana/grafana/pkg/login/social"
+	"github.com/grafana/grafana/pkg/services/oauthtoken"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/grpcplugin"
 
@@ -57,10 +56,10 @@ func (tw *DatasourcePluginWrapperV2) Query(ctx context.Context, ds *models.DataS
 		query.Headers = make(map[string]string)
 	}
 
-	if ds.JsonData != nil && ds.JsonData.Get("oauthPassThru").MustBool() {
+	if oauthtoken.IsOAuthPassThruEnabled(ds) {
 		// skip AddOAuthPassThruAuth for alerts
 		if query.User != nil {
-			token, err := social.GetCurrentOAuthToken(ctx, *query.User)
+			token, err := oauthtoken.GetCurrentOAuthToken(ctx, *query.User)
 			if err != nil {
 				tw.logger.Error("Error fetching oauth information for user", "error", err)
 			}

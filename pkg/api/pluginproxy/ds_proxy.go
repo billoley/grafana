@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/grafana/grafana/pkg/services/oauthtoken"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/grafana/grafana/pkg/api/datasource"
 	glog "github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/login/social"
 	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/setting"
@@ -207,8 +207,8 @@ func (proxy *DataSourceProxy) getDirector() func(req *http.Request) {
 			ApplyRoute(proxy.ctx.Req.Context(), req, proxy.proxyPath, proxy.route, proxy.ds)
 		}
 
-		if proxy.ds.JsonData != nil && proxy.ds.JsonData.Get("oauthPassThru").MustBool() {
-			token, err := social.GetCurrentOAuthToken(proxy.ctx.Req.Context(), *proxy.ctx.SignedInUser)
+		if oauthtoken.IsOAuthPassThruEnabled(proxy.ds) {
+			token, err := oauthtoken.GetCurrentOAuthToken(proxy.ctx.Req.Context(), *proxy.ctx.SignedInUser)
 			if err != nil {
 				logger.Error("Error fetching oauth token for user", "error", err)
 				return
